@@ -24,6 +24,50 @@ def twos(val,bits):
         val = val - (1 << bits)
     return val
 
+def simd_val_comb(xlen, bit_width, signed=True):
+    fmt = {8: 'b', 16: 'h', 32: 'w', 64: 'd'}
+    sz = fmt[bit_width]
+    var_num = xlen//bit_width
+    coverpoints = []
+    for i in range(var_num):
+        var1 = f'rs1_{sz}{i}_val'
+        var2 = f'rs2_{sz}{i}_val'
+        if (signed):
+            coverpoints += [f'{var1} > 0 and {var2} > 0']
+            coverpoints += [f'{var1} > 0 and {var2} < 0']
+            coverpoints += [f'{var1} < 0 and {var2} < 0']
+            coverpoints += [f'{var1} < 0 and {var2} > 0']
+            coverpoints += [f'{var1} == {var2}']
+            coverpoints += [f'{var1} != {var2}']
+        else:
+            coverpoints += [f'{var1} == {var2} and {var1} > 0 and {var2} > 0']
+            coverpoints += [f'{var1} != {var2} and {var1} > 0 and {var2} > 0']
+    return coverpoints
+
+def simd_base_val(rs, xlen, bit_width, signed=True):
+    fmt = {8: 'b', 16: 'h', 32: 'w', 64: 'd'}
+    sz = fmt[bit_width]
+    var_num = xlen//bit_width
+    sign_val = [(-2**(bit_width-1)), -1, 0, 1, int((2**(bit_width-1)-1))]
+    usign_val = [0, 1, 2**bit_width-2, 2**bit_width-1]
+    coverpoints = []
+    for i in range(var_num):
+        var = f'{rs}_{sz}{i}_val'
+        if (signed):
+            for val in sign_val:
+                coverpoints += [f'{var} == {val}']
+        else:
+            for val in usign_val:
+                coverpoints += [f'{var} == {val}']
+    return coverpoints
+
+def simd_imm_val(imm, bit_width):
+    usign_val = (2**(bit_width))
+    coverpoints = []
+    for i in range(usign_val):
+        coverpoints += [f'{imm} == {i}']
+    return coverpoints
+
 def sp_vals(bit_width,signed):
     if signed:
         conv_func = lambda x: twos(x,bit_width)
@@ -33,7 +77,6 @@ def sp_vals(bit_width,signed):
         sqrt_min = 0
         sqrt_max = int(sqrt((2**bit_width)-1))
         conv_func = lambda x: (int(x,16) if '0x' in x else int(x,2)) if isinstance(x,str) else x
-
     dataset = [3, "0x"+"".join(["5"]*int(bit_width/4)), "0x"+"".join(["a"]*int(bit_width/4)), 5, "0x"+"".join(["3"]*int(bit_width/4)), "0x"+"".join(["6"]*int(bit_width/4))]
     dataset = list(map(conv_func,dataset)) + [int(sqrt(abs(conv_func("0x8"+"".join(["0"]*int((bit_width/4)-1)))))*(-1 if signed else 1))] + [sqrt_min,sqrt_max]
     return dataset + [x - 1 if x>0 else 0 for x in dataset] + [x+1 for x in dataset]
@@ -158,137 +201,6 @@ def alternate(var, size, signed=True, fltr_func=None,scale_func=None):
     coverpoints = [var + ' == ' + str(d) for d in dataset]
     return coverpoints
 
-def simd_val_comb(xlen, bit_width, var_lst=["rs1_val","rs2_val"], signed=True):
-    '''
-    This function coverts an rs1_val and rs2_val combination coverpoints.
-    '''
-    twocompl_offset = 1 << bit_width
-    mask = twocompl_offset - 1
-    simd_elm_positions = [i * bit_width for i in range(xlen//bit_width)]
-    coverpoints = []
-    for s in simd_elm_positions:
-        rs1_element_bits = f'(({var_lst[0]} >> {s}) & {mask})'
-        rs2_element_bits = f'(({var_lst[1]} >> {s}) & {mask})'
-        #convert unsigned {bit_width} bits to signed values in native width
-        rs1_positive_elem_value = f'{rs1_element_bits}'
-        rs1_negative_elem_value = f'({rs1_element_bits} - {twocompl_offset})'
-        #convert unsigned {bit_width} bits to signed values in native width
-        rs2_positive_elem_value = f'{rs2_element_bits}'
-        rs2_negative_elem_value = f'({rs2_element_bits} - {twocompl_offset})'
-        if signed:
-            coverpoints += [f"{rs1_positive_elem_value} > 0 and {rs2_positive_elem_value} > 0"]
-            coverpoints += [f"{rs1_positive_elem_value} > 0 and {rs2_negative_elem_value} < 0"]
-            coverpoints += [f"{rs1_negative_elem_value} < 0 and {rs2_positive_elem_value} > 0"]
-            coverpoints += [f"{rs1_negative_elem_value} < 0 and {rs2_negative_elem_value} < 0"]
-            coverpoints += [f"{rs1_positive_elem_value} == {rs2_positive_elem_value}"]
-            coverpoints += [f"{rs1_negative_elem_value} == {rs2_negative_elem_value}"]
-            coverpoints += [f"{rs1_positive_elem_value} != {rs2_positive_elem_value}"]
-            coverpoints += [f"{rs1_negative_elem_value} != {rs2_negative_elem_value}"]
-        else:
-            coverpoints += [f"{rs1_element_bits} == {rs2_element_bits}"]
-            coverpoints += [f"{rs1_element_bits} != {rs2_element_bits}"]
-    return coverpoints
-
-def simd_base_val(var, xlen, bit_width, signed=True):
-    '''
-    This function coverts an rs_val base data coverpoints, here refer to the original 32/64 bit constraint
-    and modify it to the simd 8/16 bit and signed/unsigned bit constraint.
-    '''
-    sgn_dataset_pos = ['0', '1', str(2**(bit_width-1)-1)]
-    sgn_dataset_neg = ['-1', str(-2**(bit_width-1))]
-    usgn_dataset = ['0', '1', str(2**(bit_width)-1)]
-    twocompl_offset = 1 << bit_width
-    mask = twocompl_offset - 1
-    simd_elm_positions = [i * bit_width for i in range(xlen//bit_width)]
-    coverpoints = []
-
-    for s in simd_elm_positions:
-        element_bits = f'(({var} >> {s}) & {mask})'
-        #convert unsigned {bit_width} bits to signed values in native width
-        positive_elem_value = f'{element_bits}'
-        negative_elem_value = f'({element_bits} - {twocompl_offset})'
-
-        if signed:
-            coverpoints += [f"{positive_elem_value} == {sgn_dataset_pos[i]}" for i in range(len(sgn_dataset_pos))]
-            coverpoints += [f"{negative_elem_value} == {sgn_dataset_neg[i]}" for i in range(len(sgn_dataset_neg))]
-        else:
-            coverpoints += [f"{positive_elem_value} == {usgn_dataset[i]}" for i in range(len(usgn_dataset))]
-    return coverpoints
-
-def simd_sp_dataset(xlen, bit_width,var_lst=["rs1_val","rs2_val"],signed=True):
-    '''
-    This function coverts an rs1_val and rs2_val special data coverpoints,
-    here refer to the original 32/64 bit constraint and modify it to the
-    simd 8/16 bit and signed/unsigned bit constraint.
-    '''
-    coverpoints = []
-    datasets = []
-    var_names = []
-    twocompl_offset = 1 << bit_width
-    mask = twocompl_offset - 1
-    simd_elm_positions = [i * bit_width for i in range(xlen//bit_width)]
-
-    for var in var_lst:
-        if isinstance(var,tuple) or isinstance(var,list):
-            if len(var) == 3:
-                var_sgn = var[2]
-            else:
-                var_sgn = signed
-            var_names.append(var[0])
-            datasets.append(sp_vals(int(var[1]),var_sgn))
-        else:
-            var_names.append(var)
-            datasets.append(sp_vals(bit_width,signed))
-    dataset = itertools.product(*datasets)
-
-    for data in dataset:
-        for s in simd_elm_positions:
-            rs1_element_bits = f'(({var_names[0]} >> {s}) & {mask})'
-            rs2_element_bits = f'(({var_names[1]} >> {s}) & {mask})'
-            #convert unsigned {bit_width} bits to signed values in native width
-            rs1_positive_elem_value = f'{rs1_element_bits}'
-            rs1_negative_elem_value = f'({rs1_element_bits} - {twocompl_offset})'
-            #convert unsigned {bit_width} bits to signed values in native width
-            rs2_positive_elem_value = f'{rs2_element_bits}'
-            rs2_negative_elem_value = f'({rs2_element_bits} - {twocompl_offset})'
-            if signed:
-                rs1_elem_value = rs1_positive_elem_value if (data[0] >= 0) else rs1_negative_elem_value
-                rs2_elem_value = rs2_positive_elem_value if (data[1] >= 0) else rs2_negative_elem_value
-                coverpoints += [f"{rs1_elem_value} == {data[0]} and {rs2_elem_value} == {data[1]}"]
-            else:
-                coverpoints += [f"{rs1_positive_elem_value} == {data[0]} and {rs2_positive_elem_value} == {data[1]}"]
-    return coverpoints
-
-def simd_clip(var,var_imm,var_imm_width, xlen, bit_width, signed=True):
-    '''
-    This function converts an rs1_val and imm_val into individual coverpoints that can be used by ISAC.
-    '''
-    twocompl_offset = 1 << bit_width
-    mask = twocompl_offset - 1
-    sign_bit_mask = 1 << (bit_width - 1)
-    simd_elm_positions = [i * bit_width for i in range(xlen//bit_width)]
-    coverpoints = []
-    for s in (simd_elm_positions):
-        for val_imm in range (2**var_imm_width):
-            positive_clip_threshold = 2**val_imm - 1
-            negative_clip_threshold = -2**val_imm
-            #Divided into 4 blocks
-            element_bits = f'(({var} >> {s}) & {mask})'
-            is_positive_value = f'{element_bits} < {sign_bit_mask}'
-            #convert unsigned {bit_width} bits to signed values in native width
-            positive_elem_value = f'{element_bits}'
-            negative_elem_value = f'{element_bits}-{twocompl_offset}'
-            if signed and val_imm != bit_width - 1 or not signed:
-                coverpoints += [f"{positive_elem_value} >  {positive_clip_threshold} and {var_imm} == {val_imm} and {is_positive_value}"]
-                coverpoints += [f"{negative_elem_value} <  {negative_clip_threshold} and {var_imm} == {val_imm} and not {is_positive_value}"]
-            if val_imm != 0 and signed:
-                coverpoints += [f"{positive_elem_value} <  {positive_clip_threshold} and {var_imm} == {val_imm} and {is_positive_value}"]
-                coverpoints += [f"{negative_elem_value} >  {negative_clip_threshold} and {var_imm} == {val_imm} and not {is_positive_value}"]
-            if signed:
-                coverpoints += [f"{positive_elem_value} == {positive_clip_threshold} and {var_imm} == {val_imm} and {is_positive_value}"]
-                coverpoints += [f"{negative_elem_value} == {negative_clip_threshold} and {var_imm} == {val_imm} and not {is_positive_value}"]
-    return coverpoints
-
 def expand_cgf(cgf_files, xlen):
     '''
     This function will replace all the abstract functions with their unrolled
@@ -314,5 +226,3 @@ def expand_cgf(cgf_files, xlen):
                                     for e in exp_cp:
                                         cgf[labels][label][e] = coverage
     return cgf
-
-
