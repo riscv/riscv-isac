@@ -24,6 +24,50 @@ def twos(val,bits):
         val = val - (1 << bits)
     return val
 
+def simd_val_comb(xlen, bit_width, signed=True):
+    fmt = {8: 'b', 16: 'h', 32: 'w', 64: 'd'}
+    sz = fmt[bit_width]
+    var_num = xlen//bit_width
+    coverpoints = []
+    for i in range(var_num):
+        var1 = f'rs1_{sz}{i}_val'
+        var2 = f'rs2_{sz}{i}_val'
+        if (signed):
+            coverpoints += [f'{var1} > 0 and {var2} > 0']
+            coverpoints += [f'{var1} > 0 and {var2} < 0']
+            coverpoints += [f'{var1} < 0 and {var2} < 0']
+            coverpoints += [f'{var1} < 0 and {var2} > 0']
+            coverpoints += [f'{var1} == {var2}']
+            coverpoints += [f'{var1} != {var2}']
+        else:
+            coverpoints += [f'{var1} == {var2} and {var1} > 0 and {var2} > 0']
+            coverpoints += [f'{var1} != {var2} and {var1} > 0 and {var2} > 0']
+    return coverpoints
+
+def simd_base_val(rs, xlen, bit_width, signed=True):
+    fmt = {8: 'b', 16: 'h', 32: 'w', 64: 'd'}
+    sz = fmt[bit_width]
+    var_num = xlen//bit_width
+    sign_val = [(-2**(bit_width-1)), -1, 0, 1, int((2**(bit_width-1)-1))]
+    usign_val = [0, 1, 2**bit_width-2, 2**bit_width-1]
+    coverpoints = []
+    for i in range(var_num):
+        var = f'{rs}_{sz}{i}_val'
+        if (signed):
+            for val in sign_val:
+                coverpoints += [f'{var} == {val}']
+        else:
+            for val in usign_val:
+                coverpoints += [f'{var} == {val}']
+    return coverpoints
+
+def simd_imm_val(imm, bit_width):
+    usign_val = (2**(bit_width))
+    coverpoints = []
+    for i in range(usign_val):
+        coverpoints += [f'{imm} == {i}']
+    return coverpoints
+
 def sp_vals(bit_width,signed):
     if signed:
         conv_func = lambda x: twos(x,bit_width)
@@ -33,7 +77,6 @@ def sp_vals(bit_width,signed):
         sqrt_min = 0
         sqrt_max = int(sqrt((2**bit_width)-1))
         conv_func = lambda x: (int(x,16) if '0x' in x else int(x,2)) if isinstance(x,str) else x
-
     dataset = [3, "0x"+"".join(["5"]*int(bit_width/4)), "0x"+"".join(["a"]*int(bit_width/4)), 5, "0x"+"".join(["3"]*int(bit_width/4)), "0x"+"".join(["6"]*int(bit_width/4))]
     dataset = list(map(conv_func,dataset)) + [int(sqrt(abs(conv_func("0x8"+"".join(["0"]*int((bit_width/4)-1)))))*(-1 if signed else 1))] + [sqrt_min,sqrt_max]
     return dataset + [x - 1 if x>0 else 0 for x in dataset] + [x+1 for x in dataset]
@@ -178,10 +221,8 @@ def expand_cgf(cgf_files, xlen):
                         temp = cgf[labels][label]['abstract_comb']
                         del cgf[labels][label]['abstract_comb']
                         for coverpoints, coverage in temp.items():
-                                if 'walking' in coverpoints or 'alternate' in coverpoints or 'sp_dataset' in coverpoints:
+                                if 'walking' in coverpoints or 'alternate' in coverpoints or 'sp_dataset' in coverpoints or 'simd' in coverpoints:
                                     exp_cp = eval(coverpoints)
                                     for e in exp_cp:
                                         cgf[labels][label][e] = coverage
     return cgf
-
-
